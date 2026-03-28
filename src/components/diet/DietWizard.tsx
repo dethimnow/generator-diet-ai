@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { FunctionsHttpError } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { DietPayload } from "@/types/diet";
 import { DietResultView } from "./DietResultView";
@@ -43,7 +42,53 @@ const STEPS = ["Cel", "Styl jedzenia", "Zakupy", "Dane", "Czas i portfel", "Lod�
 
 type EdgeDietResponse = { ok?: boolean; error?: string; payload?: DietPayload };
 
-/** Edge Function — `invoke` ustawia poprawnie JWT + apikey (ręczny fetch często daje 401). */
+/** Odczyt treści z FunctionsHttpError — bez instanceof (zawodzi przy duplikatach pakietów w bundlerze). */
+async function messageFromSupabaseFunctionError(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : "Błąd wywołania funkcji";
+  const ctx =
+    error &&
+    typeof error === "object" &&
+    "context" in error &&
+    (error as { context: unknown }).context instanceof Response
+      ? ((error as { context: Response }).context as Response)
+      : null;
+
+  if (ctx) {
+    const status = ctx.status;
+    try {
+      const raw = await ctx.clone().text();
+      if (raw) {
+        try {
+          const j = JSON.parse(raw) as { error?: string; message?: string };
+          if (typeof j.error === "string" && j.error.trim()) return j.error;
+          if (typeof j.message === "string" && j.message.trim()) return j.message;
+        } catch {
+          const short = raw.length > 280 ? `${raw.slice(0, 280)}…` : raw;
+          return `${fallback} (HTTP ${status}): ${short}`;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (status === 401) {
+      return "Brak autoryzacji do funkcji (401). Wyloguj się, zaloguj ponownie i spróbuj jeszcze raz.";
+    }
+    if (status === 404) {
+      return "Nie znaleziono funkcji diet-generate (404). Wdróż Edge Function w Supabase.";
+    }
+    if (status >= 500) {
+      return `Błąd po stronie funkcji (HTTP ${status}). Sprawdź w Supabase → Edge Functions → diet-generate → Logs oraz sekret OPENAI_API_KEY.`;
+    }
+    return `${fallback} (HTTP ${status})`;
+  }
+
+  if (fallback.includes("non-2xx")) {
+    return "Funkcja diet-generate zwróciła błąd. Najczęściej: brak sekretu OPENAI_API_KEY, stary plan bez generation_input (wygeneruj od nowa), albo limit czasu — zobacz logi w Supabase.";
+  }
+  return fallback;
+}
+
+/** Edge Function — `invoke` + długi timeout (OpenAI ~1–2 min). */
 async function invokeDietGenerateEdge(
   supabase: ReturnType<typeof createClient>,
   planId: string
@@ -61,19 +106,11 @@ async function invokeDietGenerateEdge(
 
   const { data, error } = await supabase.functions.invoke<EdgeDietResponse>("diet-generate", {
     body: { planId },
+    timeout: 180_000,
   });
 
   if (error) {
-    let detail = error.message;
-    if (error instanceof FunctionsHttpError) {
-      try {
-        const body = (await error.context.json()) as { error?: string };
-        if (body?.error) detail = body.error;
-      } catch {
-        /* brak JSON w body */
-      }
-    }
-    throw new Error(detail || "Generowanie nie powiodło się.");
+    throw new Error(await messageFromSupabaseFunctionError(error));
   }
 
   if (data?.ok && data.payload) {
