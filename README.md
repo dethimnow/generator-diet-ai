@@ -44,8 +44,9 @@ npm install
 
 4. W Supabase → **Authentication → URL Configuration** ustaw:
 
-- **Site URL**: `http://localhost:3000` (lub produkcyjny URL)
-- **Redirect URLs**: `http://localhost:3000/auth/callback`, oraz URL produkcyjny z `/auth/callback`
+- **Site URL (prod):** `https://generator-diet-ai.vercel.app` (lokalnie: `http://localhost:3000`)
+- **Redirect URLs:** dodaj  
+  `https://generator-diet-ai.vercel.app/auth/callback` oraz `http://localhost:3000/auth/callback`
 
 5. Start dev:
 
@@ -57,18 +58,18 @@ Aplikacja: [http://localhost:3000](http://localhost:3000).
 
 ## Deploy na Vercel + GitHub
 
-1. Utwórz repozytorium na GitHubie (np. użytkownik `dethimnow`) i wypchnij kod:
+**Repozytorium:** [github.com/dethimnow/generator-diet-ai](https://github.com/dethimnow/generator-diet-ai)
+
+**Produkcja (Vercel):** [generator-diet-ai.vercel.app](https://generator-diet-ai.vercel.app)
+
+1. Klon / push (już skonfigurowane):
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit: Generator Diet AI"
-git branch -M main
 git remote add origin https://github.com/dethimnow/generator-diet-ai.git
 git push -u origin main
 ```
 
-2. W [Vercel](https://vercel.com) zaimportuj projekt z GitHuba.
+2. Projekt Vercel jest połączony z tym repozytorium — każdy push na `main` uruchamia build.
 
 3. W **Settings → Environment Variables** ustaw m.in.:
 
@@ -76,7 +77,7 @@ git push -u origin main
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = klucz **anon** z Supabase → Settings → API
    - `SUPABASE_SERVICE_ROLE_KEY` = **service_role** (sekret — tylko Vercel, nie w repo)
    - `OPENAI_API_KEY` = klucz OpenAI (wymagany do generowania diet)
-   - `NEXT_PUBLIC_APP_URL` = URL produkcji (np. `https://twoj-projekt.vercel.app`)
+   - `NEXT_PUBLIC_APP_URL` = `https://generator-diet-ai.vercel.app` (już ustawione na Vercel)
 
    Bez `OPENAI_API_KEY` build przejdzie, ale endpoint `/api/diet/generate` na produkcji zwróci błąd.
 
