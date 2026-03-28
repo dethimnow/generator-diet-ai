@@ -22,12 +22,46 @@ export default async function DietDetailPage({ params }: Props) {
 
   const { data: row } = await supabase
     .from("diet_plans")
-    .select("id, title, payload")
+    .select("id, title, payload, status, generation_error")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (!row) notFound();
+
+  if (row.status === "pending") {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <Link href="/panel" className="text-sm font-medium text-primary hover:underline">
+          ← Panel
+        </Link>
+        <h1 className="mt-4 text-2xl font-bold text-foreground">{row.title}</h1>
+        <p className="mt-4 text-muted">
+          Plan jest generowany w tle. Odśwież stronę za ok. minutę — albo wróć do kreatora i poczekaj na zakończenie.
+        </p>
+      </div>
+    );
+  }
+
+  if (row.status === "failed") {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <Link href="/panel" className="text-sm font-medium text-primary hover:underline">
+          ← Panel
+        </Link>
+        <h1 className="mt-4 text-2xl font-bold text-foreground">{row.title}</h1>
+        <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {row.generation_error || "Generowanie nie powiodło się. Spróbuj ponownie w kreatorze."}
+        </p>
+        <Link
+          href="/kreator"
+          className="mt-6 inline-block rounded-full bg-primary px-5 py-2 text-sm font-bold text-white hover:opacity-95"
+        >
+          Nowy plan w kreatorze
+        </Link>
+      </div>
+    );
+  }
 
   const parsed = dietPayloadSchema.safeParse(row.payload);
   if (!parsed.success) {

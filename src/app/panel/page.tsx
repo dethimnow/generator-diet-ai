@@ -30,7 +30,7 @@ export default async function PanelPage({
 
   const { data: diets } = await supabase
     .from("diet_plans")
-    .select("id, title, created_at")
+    .select("id, title, created_at, status")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(20);
@@ -104,10 +104,18 @@ export default async function PanelPage({
                 <li key={d.id}>
                   <Link
                     href={`/panel/diety/${d.id}`}
-                    className="flex items-center justify-between rounded-2xl border border-border/80 bg-surface/50 px-4 py-3 text-sm font-bold transition hover:border-primary/35 hover:bg-primary/5"
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-border/80 bg-surface/50 px-4 py-3 text-sm font-bold transition hover:border-primary/35 hover:bg-primary/5"
                   >
-                    <span>{d.title}</span>
-                    <time className="text-xs font-semibold text-muted" dateTime={d.created_at}>
+                    <span className="min-w-0 flex-1">
+                      {d.title}
+                      {d.status === "pending" && (
+                        <span className="ml-2 text-xs font-semibold text-primary">· generowanie…</span>
+                      )}
+                      {d.status === "failed" && (
+                        <span className="ml-2 text-xs font-semibold text-red-600">· błąd</span>
+                      )}
+                    </span>
+                    <time className="shrink-0 text-xs font-semibold text-muted" dateTime={d.created_at}>
                       {new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium", timeZone: "Europe/Warsaw" }).format(
                         new Date(d.created_at)
                       )}

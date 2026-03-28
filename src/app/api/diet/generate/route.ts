@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDietWithOpenAI } from "@/lib/ai/generate-diet";
 import { startOfCalendarWeekWarsaw } from "@/lib/utils";
 
@@ -94,7 +96,8 @@ export async function POST(req: Request) {
         .from("diet_plans")
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id)
-        .gte("created_at", weekStart.toISOString());
+        .gte("created_at", weekStart.toISOString())
+        .or("status.eq.ready,status.eq.pending");
 
       if (countError) {
         console.error(countError);
@@ -113,19 +116,6 @@ export async function POST(req: Request) {
     }
 
     const b = parsed.data;
-    const payload = await generateDietWithOpenAI({
-      goal: b.goal,
-      dietType: b.dietType,
-      weightKg: b.weightKg,
-      heightCm: b.heightCm,
-      age: b.age,
-      gender: b.gender,
-      cookTimeMin: b.cookTimeMin,
-      weeklyBudgetPln: b.weeklyBudgetPln,
-      store: b.store,
-      pantryItems: b.pantryItems,
-      fridgeOnly: b.fridgeOnly,
-    });
 
     const title = `Plan ${b.dietType} — ${new Intl.DateTimeFormat("pl-PL", {
       dateStyle: "medium",
@@ -137,7 +127,8 @@ export async function POST(req: Request) {
       .insert({
         user_id: user.id,
         title,
-        payload: payload as unknown as Record<string, unknown>,
+        status: "pending",
+        payload: null,
       })
       .select("id")
       .single();
@@ -166,7 +157,70 @@ export async function POST(req: Request) {
       { onConflict: "user_id" }
     );
 
-    return NextResponse.json({ id: inserted.id, payload });
+    const planId = inserted.id;
+    const userId = user.id;
+
+    after(async () => {
+      let db;
+      try {
+        db = createAdminClient();
+      } catch {
+        try {
+          db = await createClient();
+        } catch (e) {
+          console.error("diet/generate after(): brak klienta DB", e);
+          return;
+        }
+      }
+      try {
+        const payload = await generateDietWithOpenAI({
+          goal: b.goal,
+          dietType: b.dietType,
+          weightKg: b.weightKg,
+          heightCm: b.heightCm,
+          age: b.age,
+          gender: b.gender,
+          cookTimeMin: b.cookTimeMin,
+          weeklyBudgetPln: b.weeklyBudgetPln,
+          store: b.store,
+          pantryItems: b.pantryItems,
+          fridgeOnly: b.fridgeOnly,
+        });
+        const { error: upErr } = await db
+          .from("diet_plans")
+          .update({
+            status: "ready",
+            payload: payload as unknown as Record<string, unknown>,
+            generation_error: null,
+          })
+          .eq("id", planId)
+          .eq("user_id", userId);
+        if (upErr) {
+          console.error("diet/generate after update", upErr);
+          await db
+            .from("diet_plans")
+            .update({
+              status: "failed",
+              generation_error: upErr.message || "Błąd zapisu planu",
+            })
+            .eq("id", planId)
+            .eq("user_id", userId);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Błąd generowania";
+        console.error("diet/generate after()", planId, e);
+        await db
+          .from("diet_plans")
+          .update({
+            status: "failed",
+            generation_error: msg,
+          })
+          .eq("id", planId)
+          .eq("user_id", userId);
+      }
+    });
+
+    return NextResponse.json({ id: planId, status: "pending" as const }, { status: 202 });
   } catch (e) {
     console.error(e);
     const message = e instanceof Error ? e.message : "Błąd generowania";

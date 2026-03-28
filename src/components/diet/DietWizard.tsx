@@ -40,6 +40,43 @@ const BUDGETS = [100, 150, 200, 250] as const;
 
 const STEPS = ["Cel", "Styl jedzenia", "Zakupy", "Dane", "Czas i portfel", "Lodówka"] as const;
 
+async function pollDietPlanUntilReady(planId: string): Promise<DietPayload> {
+  const intervalMs = 2000;
+  const maxAttempts = 120;
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    const r = await fetch(
+      `/api/diet/generate/status?planId=${encodeURIComponent(planId)}`,
+      { credentials: "same-origin" }
+    );
+    if (r.status === 401) {
+      throw new Error("Sesja wygasła w trakcie generowania. Zaloguj się ponownie i sprawdź panel.");
+    }
+    const text = await r.text();
+    let j: {
+      status?: string;
+      error?: string;
+      payload?: unknown;
+    } = {};
+    if (text) {
+      try {
+        j = JSON.parse(text) as typeof j;
+      } catch {
+        throw new Error("Niepoprawna odpowiedź przy sprawdzaniu statusu planu.");
+      }
+    }
+    if (j.status === "ready" && j.payload) {
+      return j.payload as DietPayload;
+    }
+    if (j.status === "failed") {
+      throw new Error(j.error || "Generowanie nie powiodło się.");
+    }
+  }
+  throw new Error(
+    "Przekroczono czas oczekiwania. Otwórz panel — plan może być już gotowy albo nadal się generuje."
+  );
+}
+
 export function DietWizard() {
   const [step, setStep] = useState(0);
   const [goal, setGoal] = useState<(typeof API_GOALS)[number]>("Utrzymać wagę");
@@ -153,7 +190,13 @@ export function DietWizard() {
       }
 
       const text = await res.text();
-      let data: { error?: string; code?: string; id?: string; payload?: unknown } = {};
+      let data: {
+        error?: string;
+        code?: string;
+        id?: string;
+        status?: string;
+        payload?: unknown;
+      } = {};
       if (text) {
         try {
           data = JSON.parse(text) as typeof data;
@@ -187,13 +230,23 @@ export function DietWizard() {
         }
         return;
       }
-      if (!data.id || !data.payload) {
-        setError("Brak danych planu w odpowiedzi serwera.");
+
+      if (res.status === 202 && data.id && data.status === "pending") {
+        const payload = await pollDietPlanUntilReady(data.id);
+        clearWizardDraft();
+        setResult({ id: data.id, payload });
+        setStep(STEPS.length);
         return;
       }
-      clearWizardDraft();
-      setResult({ id: data.id, payload: data.payload as DietPayload });
-      setStep(STEPS.length);
+
+      if (data.id && data.payload) {
+        clearWizardDraft();
+        setResult({ id: data.id, payload: data.payload as DietPayload });
+        setStep(STEPS.length);
+        return;
+      }
+
+      setError("Brak danych planu w odpowiedzi serwera.");
     } catch (e: unknown) {
       const name =
         e instanceof Error
