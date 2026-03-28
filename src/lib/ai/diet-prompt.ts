@@ -13,36 +13,44 @@ export type WizardInput = {
 };
 
 export function buildDietSystemPrompt(): string {
-  return `Jesteś dietetykiem i kucharzem. Generujesz realistyczne, zdrowe plany żywienia po polsku.
-Zasady:
-- Składniki i nazwy dań po polsku, produkty powszechnie dostępne w polskich sklepach (Biedronka, Lidl, Żabka).
-- 7 dni, każdy dzień: śniadanie, drugie śniadanie, obiad, kolacja (4 posiłki) — możesz dodać przekąskę jeśli sensowne, ale minimum 4 posiłki dziennie.
-- Dopasuj kalorie i makro do celu użytkownika (schudnąć / przytyć / utrzymać) oraz typu diety.
-- Czas przygotowania każdego posiłku musi być ≤ podanego limitu minut (średnio proste dania).
-- Lista zakupów: pogrupuj pozycje do trzech sekcji dokładnie pod kluczami JSON: "Biedronka", "Lidl", "Żabka" (polskie znaki). Bez duplikatów w ramach sekcji; scal podobne składniki z ilościami.
-- Przepisy: kroki numerowane logicznie, krótko i wykonalnie.
-- Budżet tygodniowy w PLN — trzymaj się go przybliżenie (orientacyjne ceny detaliczne).
-- Zwróć WYŁĄCZNIE poprawny JSON bez markdown, bez komentarzy, zgodny ze schematem użytkownika.`;
+  return `Jesteś doświadczonym polskim dietetykiem klinicznym i ekspertem od taniego gotowania (smart shopping).
+
+Twoje zadanie: zaprojektować 7-dniowy jadłospis dopasowany do danych użytkownika.
+
+Wytyczne merytoryczne:
+- Używaj produktów realnie dostępnych w polskich sieciach: Biedronka, Lidl, Żabka (i typowe produkty „uniwersalne”).
+- Szacunkowy koszt tygodnia musi mieścić się w podanym budżecie PLN (orientacyjnie, przy cenach dyskontów).
+- Każdy posiłek musi dać się przygotować w ≤ podanej liczbie minut (średnio prosty sprzęt kuchenny).
+- Nazwy dań i składniki po polsku. W składnikach podawaj GRAMY oraz miary domowe tam gdzie to naturalne (np. „2 łyżki”, „szklanka”, „łyżeczka”).
+- Dopasuj kalorie i makro do celu (redukcja / masa / zdrowe utrzymanie) i typu diety.
+- 7 dni, dziennie minimum 4 posiłki (śniadanie, II śniadanie, obiad, kolacja). Możesz dodać lekką przekąskę jeśli pasuje.
+- Kroki przepisów: krótkie, numerowane, wykonalne dla osoby spieszącej się.
+
+Lista zakupów w JSON: nadal grupuj pod kluczami dokładnie "Biedronka", "Lidl", "Żabka" (z polską Ż). Bez duplikatów w sekcji; scal podobne pozycje.
+
+WAŻNE: Odpowiedź dla aplikacji musi być JEDNYM poprawnym obiektem JSON (bez markdown fencing, bez komentarzy), zgodnym ze schematem z wiadomości użytkownika. Treść edukacyjna „jak w markdown” przenieś do pól tekstowych w JSON (np. kroki jako pełne zdania z miarami).`;
 }
 
 export function buildDietUserPrompt(input: WizardInput): string {
   const fridge = input.fridgeOnly
-    ? "Tryb: użytkownik chce bazować głównie na produktach z lodówki — maksymalnie wykorzystaj: "
-    : "Produkty które użytkownik już ma (preferuj je w przepisach): ";
+    ? "Użytkownik ma już pełną lodówkę / chce maksymalnie wykorzystać to, co ma: "
+    : "Produkty które użytkownik już ma (priorytet w przepisach): ";
   return JSON.stringify(
     {
-      cel: input.goal,
-      typDiety: input.dietType,
-      wagaKg: input.weightKg,
-      wzrostCm: input.heightCm,
-      wiek: input.age,
-      plec: input.gender,
-      maxCzasGotowaniaMin: input.cookTimeMin,
-      budzetTygodniowyPLN: input.weeklyBudgetPln,
-      preferowanySklep: input.store,
-      uwagiProdukty: fridge + (input.pantryItems || "brak"),
-      outputSchema: {
-        summary: "1-2 zdania podsumowania planu",
+      kontekst: {
+        cel: input.goal,
+        typDiety: input.dietType,
+        wagaKg: input.weightKg,
+        wzrostCm: input.heightCm,
+        wiek: input.age,
+        plec: input.gender,
+        maxCzasGotowaniaMin: input.cookTimeMin,
+        budzetTygodniowyPLN: input.weeklyBudgetPln,
+        preferowanySklep: input.store,
+        produkty: fridge + (input.pantryItems || "brak"),
+      },
+      outputJsonSchema: {
+        summary: "1–2 zdania podsumowania planu",
         days: [
           {
             day: 1,
@@ -50,8 +58,8 @@ export function buildDietUserPrompt(input: WizardInput): string {
               {
                 name: "np. Owsianka z borówkami",
                 prepTimeMinutes: 10,
-                steps: ["krok 1", "krok 2"],
-                ingredients: [{ name: "płatki owsiane", amount: "50 g" }],
+                steps: ["krok po kroku z miarami"],
+                ingredients: [{ name: "płatki owsiane", amount: "50 g (ok. 4 łyżki)" }],
               },
             ],
           },

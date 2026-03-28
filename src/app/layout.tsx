@@ -1,34 +1,40 @@
 import type { Metadata } from "next";
-import { DM_Sans } from "next/font/google";
+import { Inter, Manrope } from "next/font/google";
 import "./globals.css";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 
-const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin", "latin-ext"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["300", "400", "500", "600", "700"],
+});
+
+const manrope = Manrope({
+  variable: "--font-manrope",
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
   title: {
-    default: "Generator Diet AI — gotowa dieta w 60 sekund",
+    default: "Generator Diet AI — dieta pod lodówkę i portfel w 60 sekund",
     template: "%s | Generator Diet AI",
   },
   description:
-    "Wpisz swoje dane, wybierz cel i otrzymaj spersonalizowaną dietę na 7 dni oraz listę zakupów dopasowaną do Biedronki, Lidla i Żabki.",
+    "Przestań zastanawiać się „co na obiad”. AI ułoży jadłospis z produktów z Twojego sklepu — budżet i czas gotowania pod kontrolą.",
   keywords: [
     "dieta AI",
-    "generator diety",
-    "keto",
-    "low carb",
-    "dieta pudełkowa",
-    "dieta vikinga",
     "lista zakupów",
+    "Biedronka",
+    "Lidl",
+    "Żabka",
+    "keto",
+    "dieta pudełkowa",
   ],
   openGraph: {
     title: "Generator Diet AI",
-    description: "Spersonalizowana dieta i lista zakupów w minutę.",
+    description: "Plan żywienia dopasowany do lodówki, portfela i czasu.",
     locale: "pl_PL",
     type: "website",
   },
@@ -40,7 +46,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pl" className={`${dmSans.variable} h-full scroll-smooth antialiased`}>
+    <html lang="pl" className={`${inter.variable} ${manrope.variable} h-full scroll-smooth antialiased`}>
+      <head>
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
+        />
+      </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <SiteHeader />
         <main className="flex-1">{children}</main>

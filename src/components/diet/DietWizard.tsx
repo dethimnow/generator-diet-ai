@@ -1,41 +1,123 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import type { DietPayload } from "@/types/diet";
 import { DietResultView } from "./DietResultView";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
+import {
+  clearWizardDraft,
+  loadWizardDraft,
+  normalizeCookTimeMin,
+  saveWizardDraft,
+  type WizardDraftV1,
+} from "@/lib/wizard-draft";
 
-const goals = ["Schudnąć", "Przytyć", "Utrzymać wagę"] as const;
-const dietTypes = ["Standardowa", "Wegetariańska", "Wegańska", "Keto", "Low-carb", "Inne"] as const;
-const genders = ["Kobieta", "Mężczyzna", "Inna"] as const;
-const cookTimes = [5, 10, 15] as const;
-const budgets = [100, 150, 200, 250] as const;
-const stores = ["Biedronka", "Lidl", "Żabka"] as const;
+const API_GOALS = ["Schudnąć", "Przytyć", "Utrzymać wagę"] as const;
+const GOAL_UI: { label: string; value: (typeof API_GOALS)[number] }[] = [
+  { label: "Chcę zredukować wagę", value: "Schudnąć" },
+  { label: "Chcę nabrać masy", value: "Przytyć" },
+  { label: "Chcę po prostu zdrowo jeść", value: "Utrzymać wagę" },
+];
 
-const steps = ["Cel", "Typ diety", "Dane", "Preferencje", "Generuj"] as const;
+const API_DIETS = ["Standardowa", "Wegetariańska", "Wegańska", "Keto"] as const;
+const DIET_UI: { label: string; value: (typeof API_DIETS)[number] }[] = [
+  { label: "Wszystkożerca", value: "Standardowa" },
+  { label: "Bez mięsa", value: "Wegetariańska" },
+  { label: "Tylko rośliny", value: "Wegańska" },
+  { label: "Wysokie tłuszcze (Keto)", value: "Keto" },
+];
+
+const STORES = ["Biedronka", "Lidl", "Żabka"] as const;
+const COOK_UI: { label: string; value: 10 | 20 | 30 }[] = [
+  { label: "Ekspres (5–10 min)", value: 10 },
+  { label: "Standard (ok. 20 min)", value: 20 },
+  { label: "Masterchef (30+ min)", value: 30 },
+];
+const BUDGETS = [100, 150, 200, 250] as const;
+
+const STEPS = ["Cel", "Styl jedzenia", "Zakupy", "Dane", "Czas i portfel", "Lodówka"] as const;
 
 export function DietWizard() {
   const [step, setStep] = useState(0);
-  const [goal, setGoal] = useState<(typeof goals)[number]>("Utrzymać wagę");
-  const [dietType, setDietType] = useState<(typeof dietTypes)[number]>("Standardowa");
+  const [goal, setGoal] = useState<(typeof API_GOALS)[number]>("Utrzymać wagę");
+  const [dietType, setDietType] = useState<(typeof API_DIETS)[number]>("Standardowa");
   const [weightKg, setWeightKg] = useState(72);
   const [heightCm, setHeightCm] = useState(170);
   const [age, setAge] = useState(30);
-  const [gender, setGender] = useState<(typeof genders)[number]>("Kobieta");
-  const [cookTimeMin, setCookTimeMin] = useState<(typeof cookTimes)[number]>(15);
+  const [gender, setGender] = useState<"Kobieta" | "Mężczyzna" | "Inna">("Kobieta");
+  const [cookTimeMin, setCookTimeMin] = useState<10 | 20 | 30>(20);
   const [weeklyBudgetPln, setWeeklyBudgetPln] = useState(150);
-  const [store, setStore] = useState<(typeof stores)[number]>("Biedronka");
-  const [pantryItems, setPantryItems] = useState("");
+  const [store, setStore] = useState<(typeof STORES)[number]>("Biedronka");
   const [fridgeOnly, setFridgeOnly] = useState(false);
+  const [pantryItems, setPantryItems] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; payload: DietPayload } | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [restoredBanner, setRestoredBanner] = useState(false);
 
   const supabase = createClient();
+
+  const persistDraft = useCallback(() => {
+    const d: WizardDraftV1 = {
+      step,
+      goal,
+      dietType,
+      weightKg,
+      heightCm,
+      age,
+      gender,
+      cookTimeMin,
+      weeklyBudgetPln,
+      store,
+      pantryItems,
+      fridgeOnly,
+    };
+    saveWizardDraft(d);
+  }, [
+    step,
+    goal,
+    dietType,
+    weightKg,
+    heightCm,
+    age,
+    gender,
+    cookTimeMin,
+    weeklyBudgetPln,
+    store,
+    pantryItems,
+    fridgeOnly,
+  ]);
+
+  useEffect(() => {
+    const d = loadWizardDraft();
+    if (!d) return;
+    setStep(Math.min(d.step, STEPS.length - 1));
+    setGoal(d.goal);
+    const safeDiet = API_DIETS.includes(d.dietType as (typeof API_DIETS)[number])
+      ? (d.dietType as (typeof API_DIETS)[number])
+      : "Standardowa";
+    setDietType(safeDiet);
+    setWeightKg(d.weightKg);
+    setHeightCm(d.heightCm);
+    setAge(d.age);
+    setGender(d.gender);
+    setCookTimeMin(normalizeCookTimeMin(Number(d.cookTimeMin)));
+    setWeeklyBudgetPln(d.weeklyBudgetPln);
+    setStore(d.store);
+    setPantryItems(d.pantryItems);
+    setFridgeOnly(d.fridgeOnly);
+    setRestoredBanner(true);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(persistDraft, 400);
+    return () => clearTimeout(t);
+  }, [persistDraft]);
 
   async function handleGenerate() {
     setError(null);
@@ -45,7 +127,8 @@ export function DietWizard() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        setError("Zaloguj się, aby wygenerować dietę.");
+        persistDraft();
+        setShowAuthModal(true);
         setLoading(false);
         return;
       }
@@ -70,17 +153,16 @@ export function DietWizard() {
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 429 && data.code === "WEEKLY_LIMIT") {
-          setError(
-            `${data.error || "Limit tygodniowy."} Możesz włączyć Premium w panelu.`
-          );
+          setError(`${data.error || "Limit tygodniowy."} Możesz włączyć Premium w panelu.`);
         } else {
           setError(data.error || "Nie udało się wygenerować diety.");
         }
         setLoading(false);
         return;
       }
+      clearWizardDraft();
       setResult({ id: data.id, payload: data.payload as DietPayload });
-      setStep(4);
+      setStep(STEPS.length);
     } catch {
       setError("Błąd sieci. Spróbuj ponownie.");
     } finally {
@@ -88,7 +170,7 @@ export function DietWizard() {
     }
   }
 
-  if (result && step === 4) {
+  if (result && step === STEPS.length) {
     return (
       <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
         <DietResultView payload={result.payload} planId={result.id} />
@@ -109,18 +191,74 @@ export function DietWizard() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
-      <div className="mb-8 flex justify-between gap-2">
-        {steps.slice(0, 4).map((label, i) => (
+    <div className="relative mx-auto max-w-2xl px-4 py-10 sm:px-6">
+      {showAuthModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-[#121c2a]/50 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="auth-modal-title"
+        >
+          <div className="relative w-full max-w-md rounded-[1.5rem] border border-border bg-card p-8 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(false)}
+              className="absolute right-4 top-4 rounded-full p-1 text-muted hover:bg-surface-low hover:text-foreground"
+              aria-label="Zamknij"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 id="auth-modal-title" className="font-headline text-xl font-bold text-foreground pr-8">
+              Załóż konto, żeby wygenerować plan
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+              Darmowe konto zajmuje chwilę. <strong>Twoje odpowiedzi z kreatora są już zapisane</strong> w tej
+              przeglądarce — po rejestracji lub logowaniu wrócisz tutaj i dokończysz jednym kliknięciem „Generuj plan”.
+            </p>
+            <div className="mt-6 flex flex-col gap-3">
+              <Link
+                href="/rejestracja?next=/kreator"
+                className="inline-flex justify-center rounded-full bg-primary px-6 py-3 text-center text-sm font-bold text-white shadow-lg shadow-primary/25 transition hover:opacity-95"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Załóż darmowe konto
+              </Link>
+              <Link
+                href="/logowanie?next=/kreator"
+                className="inline-flex justify-center rounded-full border-2 border-primary/30 bg-transparent px-6 py-3 text-center text-sm font-bold text-primary transition hover:bg-primary/5"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Mam już konto — loguję się
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {restoredBanner && (
+        <div className="mb-6 rounded-2xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-foreground">
+          Przywróciliśmy zapisany kreator. Możesz coś zmienić albo od razu wygenerować plan.
+          <button
+            type="button"
+            className="ml-2 font-bold text-primary underline"
+            onClick={() => setRestoredBanner(false)}
+          >
+            OK
+          </button>
+        </div>
+      )}
+
+      <div className="mb-8 flex flex-wrap justify-center gap-2">
+        {STEPS.map((label, i) => (
           <button
             key={label}
             type="button"
             onClick={() => i < step && setStep(i)}
-            className={`flex-1 rounded-full px-2 py-2 text-center text-xs font-semibold sm:text-sm ${
+            className={`rounded-full px-3 py-2 text-center text-[11px] font-bold sm:text-xs ${
               i === step
                 ? "bg-primary text-white shadow-md"
                 : i < step
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/12 text-primary"
                   : "bg-card text-muted ring-1 ring-border"
             }`}
           >
@@ -136,22 +274,24 @@ export function DietWizard() {
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -16 }}
           transition={{ duration: 0.25 }}
-          className="rounded-2xl border border-border bg-card p-6 shadow-sm"
+          className="rounded-[1.5rem] border border-border bg-card p-6 shadow-lg shadow-primary/5 sm:p-8"
         >
           {step === 0 && (
-            <div className="space-y-3">
-              <h2 className="text-xl font-bold text-foreground">Jaki jest Twój cel?</h2>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {goals.map((g) => (
+            <div className="space-y-4">
+              <h2 className="font-headline text-xl font-bold text-foreground">Jaki jest Twój cel na ten tydzień?</h2>
+              <div className="grid gap-3">
+                {GOAL_UI.map((g) => (
                   <button
-                    key={g}
+                    key={g.value}
                     type="button"
-                    onClick={() => setGoal(g)}
-                    className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
-                      goal === g ? "border-primary bg-primary/10 text-primary" : "border-border hover:border-primary/40"
+                    onClick={() => setGoal(g.value)}
+                    className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold transition ${
+                      goal === g.value
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border hover:border-primary/35"
                     }`}
                   >
-                    {g}
+                    {g.label}
                   </button>
                 ))}
               </div>
@@ -159,19 +299,21 @@ export function DietWizard() {
           )}
 
           {step === 1 && (
-            <div className="space-y-3">
-              <h2 className="text-xl font-bold text-foreground">Typ diety</h2>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {dietTypes.map((t) => (
+            <div className="space-y-4">
+              <h2 className="font-headline text-xl font-bold text-foreground">Jak lubisz jeść?</h2>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {DIET_UI.map((d) => (
                   <button
-                    key={t}
+                    key={d.value}
                     type="button"
-                    onClick={() => setDietType(t)}
-                    className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
-                      dietType === t ? "border-primary bg-primary/10 text-primary" : "border-border hover:border-primary/40"
+                    onClick={() => setDietType(d.value)}
+                    className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold transition ${
+                      dietType === d.value
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border hover:border-primary/35"
                     }`}
                   >
-                    {t}
+                    {d.label}
                   </button>
                 ))}
               </div>
@@ -180,9 +322,52 @@ export function DietWizard() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <h2 className="text-xl font-bold text-foreground">Twoje dane</h2>
+              <h2 className="font-headline text-xl font-bold text-foreground">Gdzie najczęściej robisz zakupy?</h2>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {STORES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      setStore(s);
+                      setFridgeOnly(false);
+                    }}
+                    className={`rounded-2xl border px-4 py-4 text-sm font-bold transition ${
+                      store === s && !fridgeOnly
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border hover:border-primary/35"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setFridgeOnly(true)}
+                  className={`rounded-2xl border px-4 py-4 text-sm font-bold transition sm:col-span-2 ${
+                    fridgeOnly
+                      ? "border-primary bg-primary/10 text-primary shadow-sm"
+                      : "border-border hover:border-primary/35"
+                  }`}
+                >
+                  Mam już pełną lodówkę
+                </button>
+              </div>
+              {fridgeOnly && (
+                <p className="text-sm text-on-surface-variant">
+                  AI oprze plan na produktach z lodówki (i uzupełni listę tylko tam, gdzie trzeba). Jako domyślny sklep
+                  do sekcji zakupów użyjemy {store} — możesz zmienić klikając powyżej.
+                </p>
+              )}
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <h2 className="font-headline text-xl font-bold text-foreground">Kilka liczb o Tobie</h2>
+              <p className="text-sm text-on-surface-variant">Potrzebne do sensownego doborku kalorii i porcji.</p>
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-sm font-medium text-muted">
+                <label className="block text-sm font-semibold text-on-surface-variant">
                   Waga (kg)
                   <input
                     type="number"
@@ -190,10 +375,10 @@ export function DietWizard() {
                     max={250}
                     value={weightKg}
                     onChange={(e) => setWeightKg(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground"
+                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-foreground"
                   />
                 </label>
-                <label className="block text-sm font-medium text-muted">
+                <label className="block text-sm font-semibold text-on-surface-variant">
                   Wzrost (cm)
                   <input
                     type="number"
@@ -201,10 +386,10 @@ export function DietWizard() {
                     max={230}
                     value={heightCm}
                     onChange={(e) => setHeightCm(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground"
+                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-foreground"
                   />
                 </label>
-                <label className="block text-sm font-medium text-muted">
+                <label className="block text-sm font-semibold text-on-surface-variant">
                   Wiek
                   <input
                     type="number"
@@ -212,18 +397,18 @@ export function DietWizard() {
                     max={100}
                     value={age}
                     onChange={(e) => setAge(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground"
+                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-foreground"
                   />
                 </label>
                 <div>
-                  <p className="text-sm font-medium text-muted">Płeć</p>
+                  <p className="text-sm font-semibold text-on-surface-variant">Płeć</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {genders.map((g) => (
+                    {(["Kobieta", "Mężczyzna", "Inna"] as const).map((g) => (
                       <button
                         key={g}
                         type="button"
                         onClick={() => setGender(g)}
-                        className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                        className={`rounded-xl border px-3 py-2 text-sm font-bold ${
                           gender === g ? "border-primary bg-primary/10 text-primary" : "border-border"
                         }`}
                       >
@@ -236,35 +421,35 @@ export function DietWizard() {
             </div>
           )}
 
-          {step === 3 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold text-foreground">Preferencje</h2>
-              <div>
-                <p className="text-sm font-medium text-muted">Czas gotowania (min)</p>
-                <div className="mt-2 flex gap-2">
-                  {cookTimes.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setCookTimeMin(m)}
-                      className={`rounded-lg border px-4 py-2 text-sm font-semibold ${
-                        cookTimeMin === m ? "border-primary bg-primary/10 text-primary" : "border-border"
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
+          {step === 4 && (
+            <div className="space-y-6">
+              <h2 className="font-headline text-xl font-bold text-foreground">Ile czasu masz na gotowanie?</h2>
+              <div className="grid gap-3">
+                {COOK_UI.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onClick={() => setCookTimeMin(c.value)}
+                    className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold transition ${
+                      cookTimeMin === c.value
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border hover:border-primary/35"
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                ))}
               </div>
               <div>
-                <p className="text-sm font-medium text-muted">Budżet tygodniowy (zł)</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {budgets.map((b) => (
+                <p className="font-headline text-lg font-bold text-foreground">Budżet na tydzień</p>
+                <p className="mt-1 text-sm text-on-surface-variant">Orientacyjnie — AI dobiera tańsze zestawienia.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {BUDGETS.map((b) => (
                     <button
                       key={b}
                       type="button"
                       onClick={() => setWeeklyBudgetPln(b)}
-                      className={`rounded-lg border px-4 py-2 text-sm font-semibold ${
+                      className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${
                         weeklyBudgetPln === b ? "border-primary bg-primary/10 text-primary" : "border-border"
                       }`}
                     >
@@ -273,72 +458,47 @@ export function DietWizard() {
                   ))}
                 </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-muted">Sklep</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {stores.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setStore(s)}
-                      className={`rounded-lg border px-4 py-2 text-sm font-semibold ${
-                        store === s ? "border-primary bg-primary/10 text-primary" : "border-border"
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="block text-sm font-medium text-muted">
-                Produkty, które masz w domu (opcjonalnie)
-                <textarea
-                  value={pantryItems}
-                  onChange={(e) => setPantryItems(e.target.value)}
-                  rows={3}
-                  placeholder="np. ryż basmati, jajka, twaróg, mrożone warzywa..."
-                  className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground"
-                />
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  checked={fridgeOnly}
-                  onChange={(e) => setFridgeOnly(e.target.checked)}
-                  className="h-4 w-4 rounded border-border text-primary"
-                />
-                Tryb: mam tylko to w lodówce (priorytet dla produktów z listy)
-              </label>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-4">
+              <h2 className="font-headline text-xl font-bold text-foreground">Co masz w lodówce?</h2>
+              <p className="text-sm text-on-surface-variant">
+                Opcjonalnie — wpisz po przecinku (np. jajka, twaróg, brokuł, ryż). AI spróbuje to wpleść w plan.
+              </p>
+              <textarea
+                value={pantryItems}
+                onChange={(e) => setPantryItems(e.target.value)}
+                rows={4}
+                placeholder="np. jajka, ser feta, szpinak, makaron pełnoziarnisty..."
+                className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-foreground"
+              />
             </div>
           )}
         </motion.div>
       </AnimatePresence>
 
       {error && (
-        <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100" role="alert">
-          {error}{" "}
-          {error.includes("Zaloguj") && (
-            <Link href="/logowanie" className="font-semibold underline">
-              Przejdź do logowania
-            </Link>
-          )}
+        <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100" role="alert">
+          {error}
         </p>
       )}
 
-      <div className="mt-6 flex justify-between gap-3">
+      <div className="mt-8 flex justify-between gap-3">
         <button
           type="button"
           disabled={step === 0}
           onClick={() => setStep((s) => Math.max(0, s - 1))}
-          className="rounded-full border border-border px-5 py-2.5 text-sm font-semibold text-muted disabled:opacity-40"
+          className="rounded-full border border-border px-5 py-2.5 text-sm font-bold text-muted disabled:opacity-40"
         >
           Wstecz
         </button>
-        {step < 3 ? (
+        {step < STEPS.length - 1 ? (
           <button
             type="button"
             onClick={() => setStep((s) => s + 1)}
-            className="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white hover:bg-primary-dark"
+            className="rounded-full bg-primary px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/20 hover:opacity-95"
           >
             Dalej
           </button>
@@ -347,10 +507,10 @@ export function DietWizard() {
             type="button"
             disabled={loading}
             onClick={handleGenerate}
-            className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 hover:opacity-95 disabled:opacity-60"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            Generuj dietę
+            Generuj plan
           </button>
         )}
       </div>

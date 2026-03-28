@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { normalizeCookTimeMin } from "@/lib/wizard-draft";
 
 type Prefs = {
   goal: string | null;
@@ -26,7 +27,9 @@ export function PreferencesSection({ initial, userId }: { initial: Prefs; userId
   const [heightCm, setHeightCm] = useState(initial?.height_cm ?? 170);
   const [age, setAge] = useState(initial?.age ?? 30);
   const [gender, setGender] = useState(initial?.gender ?? "Kobieta");
-  const [cookTimeMin, setCookTimeMin] = useState(initial?.cook_time_min ?? 15);
+  const [cookTimeMin, setCookTimeMin] = useState<10 | 20 | 30>(
+    normalizeCookTimeMin(initial?.cook_time_min ?? 20)
+  );
   const [weeklyBudgetPln, setWeeklyBudgetPln] = useState(initial?.weekly_budget_pln ?? 150);
   const [preferredStore, setPreferredStore] = useState(initial?.preferred_store ?? "Biedronka");
   const [pantryItems, setPantryItems] = useState(initial?.pantry_items ?? "");
@@ -137,12 +140,16 @@ export function PreferencesSection({ initial, userId }: { initial: Prefs; userId
           Czas gotowania (min)
           <select
             value={cookTimeMin}
-            onChange={(e) => setCookTimeMin(Number(e.target.value))}
+            onChange={(e) => setCookTimeMin(normalizeCookTimeMin(Number(e.target.value)))}
             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2"
           >
-            {[5, 10, 15].map((m) => (
-              <option key={m} value={m}>
-                {m}
+            {[
+              { v: 10, l: "Ekspres (~10 min)" },
+              { v: 20, l: "Standard (~20 min)" },
+              { v: 30, l: "Masterchef (30+ min)" },
+            ].map((m) => (
+              <option key={m.v} value={m.v}>
+                {m.l}
               </option>
             ))}
           </select>

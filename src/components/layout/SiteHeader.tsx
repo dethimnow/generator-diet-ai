@@ -1,41 +1,56 @@
 import Link from "next/link";
-import { Leaf } from "lucide-react";
 import { AuthNav } from "./AuthNav";
+import { MaterialIcon } from "@/components/ui/MaterialIcon";
 
-const links = [
+const nav = [
+  { href: "/kreator", label: "Kreator" },
   { href: "/blog", label: "Blog" },
-  { href: "/kreator", label: "Kreator diety" },
+  { href: "/panel", label: "Panel" },
 ];
 
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-50 border-b border-border/80 bg-card/90 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2 font-semibold text-foreground">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/15 text-primary">
-            <Leaf className="h-5 w-5" aria-hidden />
+    <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/75 shadow-sm shadow-primary/5 backdrop-blur-xl">
+      <nav
+        className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-3 px-4 sm:h-[4.25rem] sm:px-8"
+        aria-label="Główna nawigacja"
+      >
+        <Link href="/" className="flex items-center gap-2 font-headline text-lg font-extrabold tracking-tight text-primary sm:text-xl">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/12 text-primary">
+            <MaterialIcon name="restaurant_menu" className="text-[22px]" fill />
           </span>
           <span className="hidden sm:inline">Generator Diet AI</span>
         </Link>
-        <nav className="flex items-center gap-1 sm:gap-4" aria-label="Główne">
-          <AuthNav />
-          {links.map((l) => (
+
+        <div className="hidden items-center gap-8 md:flex">
+          {nav.map((l) => (
             <Link
               key={l.href}
               href={l.href}
-              className="rounded-lg px-2 py-2 text-sm font-medium text-muted transition hover:bg-primary/10 hover:text-primary sm:px-3"
+              className="text-sm font-bold text-on-surface-variant transition hover:text-primary"
             >
               {l.label}
             </Link>
           ))}
+        </div>
+
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Link
+            href="/panel"
+            className="hidden text-sm font-bold text-on-surface-variant hover:text-primary lg:inline"
+          >
+            Premium
+          </Link>
+          <AuthNav />
           <Link
             href="/kreator"
-            className="ml-1 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-dark"
+            className="hidden rounded-full bg-primary px-4 py-2 text-sm font-bold text-white shadow-md shadow-primary/20 transition hover:opacity-95 sm:inline-flex sm:items-center sm:gap-2"
           >
-            Generuj dietę
+            Stwórz plan
+            <MaterialIcon name="auto_awesome" className="text-base" />
           </Link>
-        </nav>
-      </div>
+        </div>
+      </nav>
     </header>
   );
 }

@@ -18,7 +18,7 @@ const bodySchema = z.object({
   heightCm: z.number().min(120).max(230),
   age: z.number().min(14).max(100),
   gender: z.enum(["Kobieta", "Mężczyzna", "Inna"]),
-  cookTimeMin: z.union([z.literal(5), z.literal(10), z.literal(15)]),
+  cookTimeMin: z.union([z.literal(10), z.literal(20), z.literal(30)]),
   weeklyBudgetPln: z.number().min(50).max(2000),
   store: z.enum(["Biedronka", "Lidl", "Żabka"]),
   pantryItems: z.string().max(2000).optional().default(""),

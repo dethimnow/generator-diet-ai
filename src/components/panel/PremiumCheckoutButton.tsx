@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-export function PremiumCheckoutButton() {
+type Variant = "default" | "onPrimary";
+
+export function PremiumCheckoutButton({ variant = "default" }: { variant?: Variant }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -24,17 +26,19 @@ export function PremiumCheckoutButton() {
     }
   }
 
+  const btnClass =
+    variant === "onPrimary"
+      ? "rounded-full bg-white px-6 py-2.5 text-sm font-bold text-primary shadow-lg hover:opacity-95 disabled:opacity-50"
+      : "rounded-full bg-foreground px-5 py-2 text-sm font-bold text-background hover:opacity-90 disabled:opacity-50";
+
   return (
     <div className="flex flex-col items-start gap-1">
-      <button
-        type="button"
-        disabled={loading}
-        onClick={go}
-        className="rounded-full bg-foreground px-5 py-2 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
-      >
-        {loading ? "Łączenie…" : "Subskrypcja Premium"}
+      <button type="button" disabled={loading} onClick={go} className={btnClass}>
+        {loading ? "Łączenie…" : "Włącz Premium"}
       </button>
-      {msg && <p className="text-xs text-red-600">{msg}</p>}
+      {msg && (
+        <p className={`text-xs ${variant === "onPrimary" ? "text-amber-200" : "text-red-600"}`}>{msg}</p>
+      )}
     </div>
   );
 }
