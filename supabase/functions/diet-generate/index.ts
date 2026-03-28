@@ -151,6 +151,142 @@ function normalizeDietJson(data: unknown): unknown {
   return o;
 }
 
+function coercePrepMinutes(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.max(1, Math.round(v));
+  if (typeof v === "string") {
+    const n = parseInt(v.replace(/\D/g, "") || "0", 10);
+    if (n > 0) return Math.min(180, Math.max(1, n));
+  }
+  return 15;
+}
+
+function repairIngredient(raw: unknown): { name: string; amount: string } | null {
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    return t ? { name: t, amount: "—" } : null;
+  }
+  if (typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const name = String(o.name ?? o.product ?? o.nazwa ?? o.item ?? "").trim();
+  const amount = String(o.amount ?? o.quantity ?? o.ilość ?? o.qty ?? "").trim();
+  if (!name) return null;
+  return { name, amount: amount || "—" };
+}
+
+function repairShoppingRow(raw: unknown): { item: string; amount: string } | null {
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    return t ? { item: t, amount: "—" } : null;
+  }
+  if (typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const item = String(o.item ?? o.name ?? o.produkt ?? "").trim();
+  const amount = String(o.amount ?? o.ilość ?? "").trim();
+  if (!item) return null;
+  return { item, amount: amount || "—" };
+}
+
+function repairMeal(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw as Record<string, unknown>;
+  const name =
+    typeof m.name === "string" && m.name.trim() ? m.name.trim() : "Posiłek";
+
+  let steps: string[] = [];
+  if (Array.isArray(m.steps)) {
+    steps = m.steps.map((s) => String(s).trim()).filter(Boolean);
+  } else if (typeof m.steps === "string" && m.steps.trim()) {
+    steps = m.steps
+      .split(/\n+|;(?=\s)/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (steps.length === 0) steps = ["Przygotuj składniki i ugotuj według nazwy dania."];
+
+  let ingredients: { name: string; amount: string }[] = [];
+  if (Array.isArray(m.ingredients)) {
+    ingredients = m.ingredients.map(repairIngredient).filter((x): x is NonNullable<typeof x> => x !== null);
+  }
+  if (ingredients.length === 0) {
+    ingredients = [{ name: "składniki wg przepisu", amount: "dopasuj porcję" }];
+  }
+
+  return {
+    name,
+    prepTimeMinutes: coercePrepMinutes(m.prepTimeMinutes),
+    steps,
+    ingredients,
+  };
+}
+
+const placeholderMeal = (): Record<string, unknown> => ({
+  name: "Lekka przekąska",
+  prepTimeMinutes: 5,
+  steps: ["Przygotuj prostą przekąskę (jogurt, owoc lub warzywo)."],
+  ingredients: [{ name: "jogurt naturalny lub owoc", amount: "1 porcja" }],
+});
+
+/** Ujednolica typowe błędy JSON z LLM zanim wejdzie Zod. */
+function repairDietJsonForValidation(data: unknown): unknown {
+  if (!data || typeof data !== "object") return data;
+  const o = { ...(data as Record<string, unknown>) };
+
+  if (typeof o.summary !== "string") delete o.summary;
+
+  let daysIn = o.days;
+  if (!Array.isArray(daysIn)) return data;
+
+  const byDay = new Map<number, Record<string, unknown>>();
+  for (const d of daysIn) {
+    if (!d || typeof d !== "object") continue;
+    const dayRec = d as Record<string, unknown>;
+    const dn = typeof dayRec.day === "number" ? dayRec.day : Number(dayRec.day);
+    if (!Number.isInteger(dn) || dn < 1 || dn > 7) continue;
+    byDay.set(dn, dayRec);
+  }
+
+  const outDays: Record<string, unknown>[] = [];
+  for (let i = 1; i <= 7; i++) {
+    let dayObj = byDay.get(i);
+    if (!dayObj) {
+      const prev = outDays[outDays.length - 1];
+      dayObj = prev
+        ? (JSON.parse(JSON.stringify(prev)) as Record<string, unknown>)
+        : { day: i, meals: [] };
+    }
+    dayObj.day = i;
+
+    let mealsRaw = dayObj.meals;
+    if (!Array.isArray(mealsRaw)) mealsRaw = [];
+    let meals = mealsRaw.map(repairMeal).filter((x): x is NonNullable<typeof x> => x !== null);
+    while (meals.length < 3) {
+      meals.push(placeholderMeal());
+    }
+    dayObj.meals = meals;
+    outDays.push(dayObj);
+  }
+  o.days = outDays;
+
+  let sl = o.shoppingList;
+  if (!sl || typeof sl !== "object") {
+    o.shoppingList = { Biedronka: [], Lidl: [], Żabka: [] };
+  } else {
+    const s = sl as Record<string, unknown>;
+    const keys = ["Biedronka", "Lidl", "Żabka"] as const;
+    const next: Record<string, unknown> = { ...s };
+    for (const k of keys) {
+      const arr = next[k];
+      if (!Array.isArray(arr)) next[k] = [];
+      else next[k] = arr.map(repairShoppingRow).filter((x): x is NonNullable<typeof x> => x !== null);
+    }
+    o.shoppingList = next;
+  }
+
+  return o;
+}
+
 async function generateDietWithOpenAI(input: WizardInput) {
   const key = Deno.env.get("OPENAI_API_KEY");
   if (!key) throw new Error("Brak OPENAI_API_KEY (ustaw sekret w Supabase)");
@@ -160,7 +296,8 @@ async function generateDietWithOpenAI(input: WizardInput) {
   const completion = await openai.chat.completions.create({
     model,
     temperature: 0.5,
-    max_tokens: 8192,
+    /* Duży plan 7×4 posiłki + lista — 8192 często obcina JSON → parse/Zod pada. */
+    max_tokens: 16_384,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: buildDietSystemPrompt() },
@@ -193,11 +330,15 @@ async function generateDietWithOpenAI(input: WizardInput) {
   }
 
   parsed = normalizeDietJson(parsed);
+  parsed = repairDietJsonForValidation(parsed);
 
   const result = dietPayloadSchema.safeParse(parsed);
   if (!result.success) {
-    console.error("diet zod", result.error.flatten());
-    throw new Error("Struktura diety nie przeszła walidacji — spróbuj ponownie.");
+    const flat = result.error.flatten();
+    console.error("diet zod", flat);
+    throw new Error(
+      "Model zwrócił plan w nieoczekiwanym kształcie. Spróbuj ponownie za chwilę."
+    );
   }
   return result.data;
 }
