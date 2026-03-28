@@ -40,41 +40,38 @@ const BUDGETS = [100, 150, 200, 250] as const;
 
 const STEPS = ["Cel", "Styl jedzenia", "Zakupy", "Dane", "Czas i portfel", "Lodówka"] as const;
 
-async function pollDietPlanUntilReady(planId: string): Promise<DietPayload> {
-  const intervalMs = 2000;
-  const maxAttempts = 120;
-  for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, intervalMs));
-    const r = await fetch(
-      `/api/diet/generate/status?planId=${encodeURIComponent(planId)}`,
-      { credentials: "same-origin" }
-    );
-    if (r.status === 401) {
-      throw new Error("Sesja wygasła w trakcie generowania. Zaloguj się ponownie i sprawdź panel.");
-    }
-    const text = await r.text();
-    let j: {
-      status?: string;
-      error?: string;
-      payload?: unknown;
-    } = {};
-    if (text) {
-      try {
-        j = JSON.parse(text) as typeof j;
-      } catch {
-        throw new Error("Niepoprawna odpowiedź przy sprawdzaniu statusu planu.");
-      }
-    }
-    if (j.status === "ready" && j.payload) {
-      return j.payload as DietPayload;
-    }
-    if (j.status === "failed") {
-      throw new Error(j.error || "Generowanie nie powiodło się.");
+/** OpenAI + zapis planu w Supabase Edge (długi czas) — omija limit ~10 s Vercel Hobby. */
+async function invokeDietGenerateEdge(
+  planId: string,
+  accessToken: string,
+  supabaseUrl: string,
+  anonKey: string
+): Promise<DietPayload> {
+  const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/diet-generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ planId }),
+  });
+  const text = await res.text();
+  let j: { ok?: boolean; error?: string; payload?: unknown } = {};
+  if (text) {
+    try {
+      j = JSON.parse(text) as typeof j;
+    } catch {
+      throw new Error(`Odpowiedź funkcji generowania jest niepoprawna (HTTP ${res.status}).`);
     }
   }
-  throw new Error(
-    "Przekroczono czas oczekiwania. Otwórz panel — plan może być już gotowy albo nadal się generuje."
-  );
+  if (!res.ok) {
+    throw new Error(j.error || `Generowanie nie powiodło się (HTTP ${res.status}).`);
+  }
+  if (j.ok && j.payload) {
+    return j.payload as DietPayload;
+  }
+  throw new Error(j.error || "Brak danych planu w odpowiedzi.");
 }
 
 export function DietWizard() {
@@ -232,7 +229,25 @@ export function DietWizard() {
       }
 
       if (res.status === 202 && data.id && data.status === "pending") {
-        const payload = await pollDietPlanUntilReady(data.id);
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          setError("Brak aktywnej sesji — zaloguj się ponownie i spróbuj jeszcze raz.");
+          return;
+        }
+        const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+        const sbAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+        if (!sbUrl || sbUrl.includes("placeholder") || !sbAnon || sbAnon.includes("placeholder")) {
+          setError("Brak konfiguracji Supabase w aplikacji.");
+          return;
+        }
+        const payload = await invokeDietGenerateEdge(
+          data.id,
+          session.access_token,
+          sbUrl,
+          sbAnon
+        );
         clearWizardDraft();
         setResult({ id: data.id, payload });
         setStep(STEPS.length);

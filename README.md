@@ -76,12 +76,16 @@ git push -u origin main
    - `NEXT_PUBLIC_SUPABASE_URL` = `https://zzvkmrhvezsyrmwcntgh.supabase.co`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = klucz **anon** z Supabase → Settings → API
    - `SUPABASE_SERVICE_ROLE_KEY` = **service_role** (sekret — tylko Vercel, nie w repo)
-   - `OPENAI_API_KEY` = klucz OpenAI (wymagany do generowania diet)
+   - `OPENAI_API_KEY` = klucz OpenAI (opcjonalnie na Vercel; **generowanie diet działa w Edge Function**)
    - `NEXT_PUBLIC_APP_URL` = `https://generator-diet-ai.vercel.app` (już ustawione na Vercel)
 
-   Bez `OPENAI_API_KEY` build przejdzie, ale endpoint `/api/diet/generate` na produkcji zwróci błąd.
+4. **Supabase Edge Function `diet-generate`** (generowanie AI — omija limit ~10 s Vercel Hobby):
 
-4. **Stripe (opcjonalnie)**
+   - Kod funkcji: `supabase/functions/diet-generate/index.ts` (wdrożenie: `supabase functions deploy diet-generate` albo panel Supabase).
+   - W Supabase → **Edge Functions → Secrets** ustaw **`OPENAI_API_KEY`** (ten sam klucz co w OpenAI). Opcjonalnie **`OPENAI_MODEL`** (domyślnie `gpt-4o-mini`).
+   - Bez tego sekretu plan zostaje w stanie `pending`, a w logach funkcji widać błąd braku klucza.
+
+5. **Stripe (opcjonalnie)**
 
    - Utwórz produkt subskrypcyjny i skopiuj **Price ID** do `STRIPE_PRICE_ID`.
    - W Stripe Dashboard dodaj endpoint webhooka: `https://twoja-domena.vercel.app/api/stripe/webhook` i zdarzenia m.in. `checkout.session.completed`, `customer.subscription.deleted`.
