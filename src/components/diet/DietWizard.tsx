@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { DietPayload } from "@/types/diet";
 import { DietResultView } from "./DietResultView";
@@ -40,38 +41,48 @@ const BUDGETS = [100, 150, 200, 250] as const;
 
 const STEPS = ["Cel", "Styl jedzenia", "Zakupy", "Dane", "Czas i portfel", "Lodówka"] as const;
 
-/** OpenAI + zapis planu w Supabase Edge (długi czas) — omija limit ~10 s Vercel Hobby. */
+type EdgeDietResponse = { ok?: boolean; error?: string; payload?: DietPayload };
+
+/** Edge Function — `invoke` ustawia poprawnie JWT + apikey (ręczny fetch często daje 401). */
 async function invokeDietGenerateEdge(
-  planId: string,
-  accessToken: string,
-  supabaseUrl: string,
-  anonKey: string
+  supabase: ReturnType<typeof createClient>,
+  planId: string
 ): Promise<DietPayload> {
-  const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/diet-generate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-      apikey: anonKey,
-    },
-    body: JSON.stringify({ planId }),
+  const { error: refreshErr } = await supabase.auth.refreshSession();
+  if (refreshErr) {
+    console.warn("refreshSession:", refreshErr.message);
+  }
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error("Sesja wygasła — zaloguj się ponownie i spróbuj „Generuj plan” jeszcze raz.");
+  }
+
+  const { data, error } = await supabase.functions.invoke<EdgeDietResponse>("diet-generate", {
+    body: { planId },
   });
-  const text = await res.text();
-  let j: { ok?: boolean; error?: string; payload?: unknown } = {};
-  if (text) {
-    try {
-      j = JSON.parse(text) as typeof j;
-    } catch {
-      throw new Error(`Odpowiedź funkcji generowania jest niepoprawna (HTTP ${res.status}).`);
+
+  if (error) {
+    let detail = error.message;
+    if (error instanceof FunctionsHttpError) {
+      try {
+        const body = (await error.context.json()) as { error?: string };
+        if (body?.error) detail = body.error;
+      } catch {
+        /* brak JSON w body */
+      }
     }
+    throw new Error(detail || "Generowanie nie powiodło się.");
   }
-  if (!res.ok) {
-    throw new Error(j.error || `Generowanie nie powiodło się (HTTP ${res.status}).`);
+
+  if (data?.ok && data.payload) {
+    return data.payload;
   }
-  if (j.ok && j.payload) {
-    return j.payload as DietPayload;
+  if (data?.error) {
+    throw new Error(data.error);
   }
-  throw new Error(j.error || "Brak danych planu w odpowiedzi.");
+  throw new Error("Brak danych planu w odpowiedzi.");
 }
 
 export function DietWizard() {
@@ -229,25 +240,7 @@ export function DietWizard() {
       }
 
       if (res.status === 202 && data.id && data.status === "pending") {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          setError("Brak aktywnej sesji — zaloguj się ponownie i spróbuj jeszcze raz.");
-          return;
-        }
-        const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-        const sbAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-        if (!sbUrl || sbUrl.includes("placeholder") || !sbAnon || sbAnon.includes("placeholder")) {
-          setError("Brak konfiguracji Supabase w aplikacji.");
-          return;
-        }
-        const payload = await invokeDietGenerateEdge(
-          data.id,
-          session.access_token,
-          sbUrl,
-          sbAnon
-        );
+        const payload = await invokeDietGenerateEdge(supabase, data.id);
         clearWizardDraft();
         setResult({ id: data.id, payload });
         setStep(STEPS.length);
