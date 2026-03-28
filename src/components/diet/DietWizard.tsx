@@ -122,49 +122,99 @@ export function DietWizard() {
   async function handleGenerate() {
     setError(null);
     setLoading(true);
+    const authMs = 15_000;
+    const fetchMs = 120_000;
     try {
+      const authResult = await Promise.race([
+        supabase.auth.getUser(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("AUTH_TIMEOUT")), authMs)
+        ),
+      ]);
       const {
         data: { user },
-      } = await supabase.auth.getUser();
+      } = authResult;
       if (!user) {
         persistDraft();
         setShowAuthModal(true);
-        setLoading(false);
         return;
       }
 
-      const res = await fetch("/api/diet/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal,
-          dietType,
-          weightKg,
-          heightCm,
-          age,
-          gender,
-          cookTimeMin,
-          weeklyBudgetPln,
-          store,
-          pantryItems,
-          fridgeOnly,
-        }),
-      });
-      const data = await res.json();
+      const ac = new AbortController();
+      const fetchTimer = setTimeout(() => ac.abort(), fetchMs);
+      let res: Response;
+      try {
+        res = await fetch("/api/diet/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: ac.signal,
+          body: JSON.stringify({
+            goal,
+            dietType,
+            weightKg,
+            heightCm,
+            age,
+            gender,
+            cookTimeMin,
+            weeklyBudgetPln,
+            store,
+            pantryItems,
+            fridgeOnly,
+          }),
+        });
+      } finally {
+        clearTimeout(fetchTimer);
+      }
+
+      const text = await res.text();
+      let data: { error?: string; code?: string; id?: string; payload?: unknown } = {};
+      if (text) {
+        try {
+          data = JSON.parse(text) as typeof data;
+        } catch {
+          setError(
+            res.ok
+              ? "Serwer zwrócił niepoprawną odpowiedź. Odśwież stronę i spróbuj ponownie."
+              : `Błąd serwera (${res.status}). Spróbuj ponownie za chwilę.`
+          );
+          return;
+        }
+      }
+
       if (!res.ok) {
         if (res.status === 429 && data.code === "WEEKLY_LIMIT") {
           setError(`${data.error || "Limit tygodniowy."} Możesz włączyć Premium w panelu.`);
         } else {
           setError(data.error || "Nie udało się wygenerować diety.");
         }
-        setLoading(false);
+        return;
+      }
+      if (!data.id || !data.payload) {
+        setError("Brak danych planu w odpowiedzi serwera.");
         return;
       }
       clearWizardDraft();
       setResult({ id: data.id, payload: data.payload as DietPayload });
       setStep(STEPS.length);
-    } catch {
-      setError("Błąd sieci. Spróbuj ponownie.");
+    } catch (e: unknown) {
+      const name =
+        e instanceof Error
+          ? e.name
+          : typeof e === "object" && e !== null && "name" in e
+            ? String((e as { name: unknown }).name)
+            : "";
+      const message = e instanceof Error ? e.message : "";
+      if (name === "AbortError") {
+        setError(
+          "Przekroczono czas oczekiwania. Na darmowym planie Vercel funkcja może mieć limit ~10 s — wtedy potrzebny jest Pro lub krótszy plan AI. Spróbuj ponownie."
+        );
+      } else if (message === "AUTH_TIMEOUT") {
+        setError("Nie udało się zweryfikować sesji (timeout). Odśwież stronę i zaloguj się ponownie.");
+      } else if (message) {
+        setError(message);
+      } else {
+        setError("Błąd sieci. Spróbuj ponownie.");
+      }
     } finally {
       setLoading(false);
     }

@@ -4,6 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { generateDietWithOpenAI } from "@/lib/ai/generate-diet";
 import { startOfCalendarWeekWarsaw } from "@/lib/utils";
 
+/** Na Hobby Vercel nadal obowiązuje limit planu (np. 10 s); na Pro można wydłużyć generowanie. */
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   goal: z.enum(["Schudnąć", "Przytyć", "Utrzymać wagę"]),
   dietType: z.enum([

@@ -30,7 +30,11 @@ function normalizeDietJson(data: unknown): unknown {
 export async function generateDietWithOpenAI(input: WizardInput): Promise<DietPayload> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("Brak OPENAI_API_KEY");
-  const openai = new OpenAI({ apiKey: key });
+  const openai = new OpenAI({
+    apiKey: key,
+    maxRetries: 1,
+    timeout: 55_000,
+  });
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
   const completion = await openai.chat.completions.create({
