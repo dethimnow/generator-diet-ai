@@ -69,7 +69,13 @@ export function DietWizard() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Nie udało się wygenerować diety.");
+        if (res.status === 429 && data.code === "WEEKLY_LIMIT") {
+          setError(
+            `${data.error || "Limit tygodniowy."} Możesz włączyć Premium w panelu.`
+          );
+        } else {
+          setError(data.error || "Nie udało się wygenerować diety.");
+        }
         setLoading(false);
         return;
       }
