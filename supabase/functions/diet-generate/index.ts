@@ -204,7 +204,8 @@ async function generateDietWithOpenAI(input: WizardInput) {
 
 /** Klient z uprawnieniami do zapisu planu (service role albo JWT użytkownika). */
 function createDbClient(supabaseUrl: string, authHeader: string): SupabaseClient {
-  const sr = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  /* Sekretów Edge nie można nazywać SUPABASE_* — używamy SERVICE_ROLE_KEY (JWT service_role z API). */
+  const sr = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (sr) {
     return createClient(supabaseUrl, sr);
   }
