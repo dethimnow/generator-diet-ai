@@ -16,6 +16,20 @@ Polska aplikacja webowa: spersonalizowana **dieta na 7 dni**, **lista zakupów**
 - Konto [Supabase](https://supabase.com)
 - Klucz [OpenAI API](https://platform.openai.com)
 
+## Supabase — projekt pod ten kod
+
+Używany projekt w organizacji **dethimnow’s Org**:
+
+| | |
+|---|---|
+| **Nazwa** | Generator Diet AI |
+| **Ref** | `zzvkmrhvezsyrmwcntgh` |
+| **URL** | `https://zzvkmrhvezsyrmwcntgh.supabase.co` |
+
+Migracja schematu jest już zastosowana w tym projekcie. W **Settings → API** skopiuj **anon** (legacy JWT) i **service_role** do zmiennych środowiskowych.
+
+**Uwaga (plan Free):** przed utworzeniem tego projektu wstrzymany został projekt **„Build The Tower of Today”** (limit 2 aktywnych projektów). Możesz go **Restore** w panelu Supabase, jeśli masz miejsce na koncie.
+
 ## Uruchomienie lokalne
 
 1. Sklonuj repozytorium i zainstaluj zależności:
@@ -24,13 +38,9 @@ Polska aplikacja webowa: spersonalizowana **dieta na 7 dni**, **lista zakupów**
 npm install
 ```
 
-2. Skopiuj `.env.example` do `.env.local` i uzupełnij zmienne.
+2. Skopiuj `.env.example` do `.env.local` i uzupełnij zmienne (URL + anon + service_role z projektu powyżej, `OPENAI_API_KEY`).
 
-3. W Supabase uruchom migrację SQL z pliku:
-
-`supabase/migrations/20260328000000_init.sql`
-
-(albo Supabase CLI: `supabase link` + `supabase db push`, jeśli używasz CLI).
+3. Migracja w repozytorium (`supabase/migrations/20260328000000_init.sql`) jest zsynchronizowana z projektem Supabase — nie musisz jej ponownie uruchamiać, chyba że zakładasz **nową** instancję.
 
 4. W Supabase → **Authentication → URL Configuration** ustaw:
 
@@ -60,7 +70,15 @@ git push -u origin main
 
 2. W [Vercel](https://vercel.com) zaimportuj projekt z GitHuba.
 
-3. W **Settings → Environment Variables** dodaj te same zmienne co w `.env.local` (w tym `NEXT_PUBLIC_APP_URL` = URL produkcyjny, np. `https://twoja-domena.vercel.app`).
+3. W **Settings → Environment Variables** ustaw m.in.:
+
+   - `NEXT_PUBLIC_SUPABASE_URL` = `https://zzvkmrhvezsyrmwcntgh.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = klucz **anon** z Supabase → Settings → API
+   - `SUPABASE_SERVICE_ROLE_KEY` = **service_role** (sekret — tylko Vercel, nie w repo)
+   - `OPENAI_API_KEY` = klucz OpenAI (wymagany do generowania diet)
+   - `NEXT_PUBLIC_APP_URL` = URL produkcji (np. `https://twoj-projekt.vercel.app`)
+
+   Bez `OPENAI_API_KEY` build przejdzie, ale endpoint `/api/diet/generate` na produkcji zwróci błąd.
 
 4. **Stripe (opcjonalnie)**
 
