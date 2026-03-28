@@ -7,6 +7,15 @@ import { startOfCalendarWeekWarsaw } from "@/lib/utils";
 /** Na Hobby Vercel nadal obowiązuje limit planu (np. 10 s); na Pro można wydłużyć generowanie. */
 export const maxDuration = 60;
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(label)), ms)
+    ),
+  ]);
+}
+
 const bodySchema = z.object({
   goal: z.enum(["Schudnąć", "Przytyć", "Utrzymać wagę"]),
   dietType: z.enum([
@@ -40,9 +49,27 @@ export async function POST(req: Request) {
     }
 
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    let user: { id: string } | null = null;
+    try {
+      const {
+        data: { user: u },
+      } = await withTimeout(supabase.auth.getUser(), 12_000, "AUTH_GETUSER_TIMEOUT");
+      user = u;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "AUTH_GETUSER_TIMEOUT") {
+        console.error("diet/generate: getUser timeout");
+        return NextResponse.json(
+          {
+            error:
+              "Timeout weryfikacji sesji. Odśwież stronę, zaloguj się ponownie lub wyłącz blokowanie ciasteczek dla tej domeny.",
+            code: "AUTH_TIMEOUT",
+          },
+          { status: 504 }
+        );
+      }
+      throw e;
+    }
     if (!user) {
       return NextResponse.json(
         { error: "Zaloguj się, aby wygenerować dietę." },

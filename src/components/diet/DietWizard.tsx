@@ -122,30 +122,16 @@ export function DietWizard() {
   async function handleGenerate() {
     setError(null);
     setLoading(true);
-    const authMs = 15_000;
     const fetchMs = 120_000;
     try {
-      const authResult = await Promise.race([
-        supabase.auth.getUser(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("AUTH_TIMEOUT")), authMs)
-        ),
-      ]);
-      const {
-        data: { user },
-      } = authResult;
-      if (!user) {
-        persistDraft();
-        setShowAuthModal(true);
-        return;
-      }
-
+      /* Bez getUser() w przeglądarce — często tam wisi na Supabase; sesję sprawdza API (ciasteczka). */
       const ac = new AbortController();
       const fetchTimer = setTimeout(() => ac.abort(), fetchMs);
       let res: Response;
       try {
         res = await fetch("/api/diet/generate", {
           method: "POST",
+          credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           signal: ac.signal,
           body: JSON.stringify({
@@ -182,6 +168,18 @@ export function DietWizard() {
       }
 
       if (!res.ok) {
+        if (res.status === 401) {
+          persistDraft();
+          setShowAuthModal(true);
+          return;
+        }
+        if (res.status === 504 && data.code === "AUTH_TIMEOUT") {
+          setError(
+            data.error ||
+              "Timeout weryfikacji sesji. Odśwież stronę lub zaloguj się ponownie."
+          );
+          return;
+        }
         if (res.status === 429 && data.code === "WEEKLY_LIMIT") {
           setError(`${data.error || "Limit tygodniowy."} Możesz włączyć Premium w panelu.`);
         } else {
@@ -208,8 +206,6 @@ export function DietWizard() {
         setError(
           "Przekroczono czas oczekiwania. Na darmowym planie Vercel funkcja może mieć limit ~10 s — wtedy potrzebny jest Pro lub krótszy plan AI. Spróbuj ponownie."
         );
-      } else if (message === "AUTH_TIMEOUT") {
-        setError("Nie udało się zweryfikować sesji (timeout). Odśwież stronę i zaloguj się ponownie.");
       } else if (message) {
         setError(message);
       } else {
