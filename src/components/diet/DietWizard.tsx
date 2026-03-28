@@ -58,6 +58,9 @@ async function messageFromSupabaseFunctionError(error: unknown): Promise<string>
     try {
       const raw = await ctx.clone().text();
       if (raw) {
+        if (/invalid\s+jwt/i.test(raw)) {
+          return "Błąd „Invalid JWT” z bramy Supabase. W panelu: Edge Functions → diet-generate → wyłącz weryfikację JWT (Verify JWT), albo wyloguj się i zaloguj ponownie. Sprawdź też, czy na Vercel URL i klucz anon są z tego samego projektu.";
+        }
         try {
           const j = JSON.parse(raw) as { error?: string; message?: string };
           if (typeof j.error === "string" && j.error.trim()) return j.error;
@@ -93,19 +96,20 @@ async function invokeDietGenerateEdge(
   supabase: ReturnType<typeof createClient>,
   planId: string
 ): Promise<DietPayload> {
-  const { error: refreshErr } = await supabase.auth.refreshSession();
+  const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
   if (refreshErr) {
     console.warn("refreshSession:", refreshErr.message);
   }
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session?.access_token) {
+  const accessToken =
+    refreshed.session?.access_token ?? (await supabase.auth.getSession()).data.session?.access_token;
+  if (!accessToken) {
     throw new Error("Sesja wygasła — zaloguj się ponownie i spróbuj „Generuj plan” jeszcze raz.");
   }
 
+  /* Jawny Bearer — inaczej fetch czasem podstawia anon zamiast sesji → brama Supabase: „Invalid JWT”. */
   const { data, error } = await supabase.functions.invoke<EdgeDietResponse>("diet-generate", {
     body: { planId },
+    headers: { Authorization: `Bearer ${accessToken}` },
     timeout: 180_000,
   });
 

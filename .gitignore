@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# lokalny payload do MCP (generowany skryptem)
+/_mcp_edge_deploy.json
+/_deploy_mcp.json

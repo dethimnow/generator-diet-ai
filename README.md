@@ -84,6 +84,7 @@ git push -u origin main
    - Kod funkcji: `supabase/functions/diet-generate/index.ts` (wdrożenie: `supabase functions deploy diet-generate` albo panel Supabase).
    - W Supabase → **Edge Functions → Secrets** ustaw **`OPENAI_API_KEY`** (ten sam klucz co w OpenAI). Opcjonalnie **`OPENAI_MODEL`** (domyślnie `gpt-4o-mini`).
    - Bez tego sekretu plan zostaje w stanie `pending`, a w logach funkcji widać błąd braku klucza.
+   - Jeśli w przeglądarce widzisz **„Invalid JWT”**: w panelu Supabase otwórz funkcję **diet-generate** i **wyłącz weryfikację JWT na bramce** (np. *Enforce JWT verification* / *Verify JWT* — zależnie od wersji UI). Dostęp i tak sprawdzamy w kodzie funkcji (`getUser()`). Upewnij się też, że na Vercel **`NEXT_PUBLIC_SUPABASE_URL`** i **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** są z **tego samego** projektu co funkcja.
 
 5. **Stripe (opcjonalnie)**
 
