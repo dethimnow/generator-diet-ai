@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import OpenAI from "https://esm.sh/openai@4.77.3";
 import { z } from "https://esm.sh/zod@3.24.1";
 
@@ -154,7 +154,7 @@ function normalizeDietJson(data: unknown): unknown {
 async function generateDietWithOpenAI(input: WizardInput) {
   const key = Deno.env.get("OPENAI_API_KEY");
   if (!key) throw new Error("Brak OPENAI_API_KEY (ustaw sekret w Supabase)");
-  const openai = new OpenAI({ apiKey: key, maxRetries: 1, timeout: 120_000 });
+  const openai = new OpenAI({ apiKey: key, maxRetries: 1, timeout: 150_000 });
   const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
 
   const completion = await openai.chat.completions.create({
@@ -200,6 +200,67 @@ async function generateDietWithOpenAI(input: WizardInput) {
     throw new Error("Struktura diety nie przeszła walidacji — spróbuj ponownie.");
   }
   return result.data;
+}
+
+/** Klient z uprawnieniami do zapisu planu (service role albo JWT użytkownika). */
+function createDbClient(supabaseUrl: string, authHeader: string): SupabaseClient {
+  const sr = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (sr) {
+    return createClient(supabaseUrl, sr);
+  }
+  const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
+  return createClient(supabaseUrl, anon, {
+    global: { headers: { Authorization: authHeader } },
+  });
+}
+
+async function runGenerationJob(
+  supabaseUrl: string,
+  authHeader: string,
+  planId: string,
+  userId: string,
+  input: WizardInput
+) {
+  const db = createDbClient(supabaseUrl, authHeader);
+  try {
+    const payload = await generateDietWithOpenAI(input);
+    const { error: upErr } = await db
+      .from("diet_plans")
+      .update({
+        status: "ready",
+        payload: payload as unknown as Record<string, unknown>,
+        generation_error: null,
+      })
+      .eq("id", planId)
+      .eq("user_id", userId);
+
+    if (upErr) {
+      console.error("update error", upErr);
+      await db
+        .from("diet_plans")
+        .update({ status: "failed", generation_error: upErr.message })
+        .eq("id", planId)
+        .eq("user_id", userId);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Błąd generowania";
+    console.error("OpenAI error", e);
+    await db
+      .from("diet_plans")
+      .update({ status: "failed", generation_error: msg })
+      .eq("id", planId)
+      .eq("user_id", userId);
+  }
+}
+
+function scheduleBackground(promise: Promise<void>): boolean {
+  const g = globalThis as Record<string, { waitUntil?: (p: Promise<unknown>) => void } | undefined>;
+  const er = g.EdgeRuntime;
+  if (er?.waitUntil) {
+    er.waitUntil(promise);
+    return true;
+  }
+  return false;
 }
 
 Deno.serve(async (req: Request) => {
@@ -273,48 +334,37 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    let payload: z.infer<typeof dietPayloadSchema>;
-    try {
-      payload = await generateDietWithOpenAI(input);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Błąd generowania";
-      console.error("OpenAI error", e);
-      await supabase
-        .from("diet_plans")
-        .update({ status: "failed", generation_error: msg })
-        .eq("id", planId)
-        .eq("user_id", user.id);
-      return new Response(JSON.stringify({ error: msg }), {
-        status: 500,
+    const job = runGenerationJob(supabaseUrl, authHeader, planId, user.id, input);
+
+    if (scheduleBackground(job)) {
+      return new Response(JSON.stringify({ ok: true, accepted: true, planId }), {
+        status: 202,
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
-    const { error: upErr } = await supabase
+    /* Lokalnie (CLI) EdgeRuntime często nie trzyma tła — czekamy synchronicznie. */
+    await job;
+    const db = createDbClient(supabaseUrl, authHeader);
+    const { data: after } = await db
       .from("diet_plans")
-      .update({
-        status: "ready",
-        payload: payload as unknown as Record<string, unknown>,
-        generation_error: null,
-      })
+      .select("status, payload, generation_error")
       .eq("id", planId)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .single();
 
-    if (upErr) {
-      console.error("update error", upErr);
-      await supabase
-        .from("diet_plans")
-        .update({ status: "failed", generation_error: upErr.message })
-        .eq("id", planId)
-        .eq("user_id", user.id);
-      return new Response(JSON.stringify({ error: "Nie udało się zapisać planu" }), {
-        status: 500,
+    if (after?.status === "ready" && after.payload) {
+      return new Response(JSON.stringify({ ok: true, planId, payload: after.payload }), {
+        status: 200,
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
-
-    return new Response(JSON.stringify({ ok: true, planId, payload }), {
-      status: 200,
+    const errMsg =
+      typeof after?.generation_error === "string" && after.generation_error.trim()
+        ? after.generation_error
+        : "Generowanie nie powiodło się";
+    return new Response(JSON.stringify({ error: errMsg }), {
+      status: 500,
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {

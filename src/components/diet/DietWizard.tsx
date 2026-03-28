@@ -40,7 +40,51 @@ const BUDGETS = [100, 150, 200, 250] as const;
 
 const STEPS = ["Cel", "Styl jedzenia", "Zakupy", "Dane", "Czas i portfel", "Lodówka"] as const;
 
-type EdgeDietResponse = { ok?: boolean; error?: string; payload?: DietPayload };
+type EdgeDietResponse = {
+  ok?: boolean;
+  accepted?: boolean;
+  planId?: string;
+  error?: string;
+  payload?: DietPayload;
+};
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+/** Po 202 z Edge (generowanie w tle) — czytamy status z RLS jak zwykły użytkownik. */
+async function waitForPlanPayload(
+  supabase: ReturnType<typeof createClient>,
+  planId: string,
+  opts: { maxMs: number; intervalMs: number }
+): Promise<DietPayload> {
+  const deadline = Date.now() + opts.maxMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await supabase
+      .from("diet_plans")
+      .select("status, payload, generation_error")
+      .eq("id", planId)
+      .single();
+
+    if (error) {
+      throw new Error(error.message || "Nie udało się odczytać planu");
+    }
+    if (data?.status === "ready" && data.payload) {
+      return data.payload as DietPayload;
+    }
+    if (data?.status === "failed") {
+      const msg =
+        typeof data.generation_error === "string" && data.generation_error.trim()
+          ? data.generation_error
+          : "Generowanie nie powiodło się";
+      throw new Error(msg);
+    }
+    await sleep(opts.intervalMs);
+  }
+  throw new Error(
+    "Minął limit oczekiwania. Otwórz Panel — plan może być już gotowy albo spróbuj „Generuj plan” ponownie."
+  );
+}
 
 /** Odczyt treści z FunctionsHttpError — bez instanceof (zawodzi przy duplikatach pakietów w bundlerze). */
 async function messageFromSupabaseFunctionError(error: unknown): Promise<string> {
@@ -91,10 +135,14 @@ async function messageFromSupabaseFunctionError(error: unknown): Promise<string>
   return fallback;
 }
 
-/** Edge Function — `invoke` + długi timeout (OpenAI ~1–2 min). */
+/**
+ * Edge Function: na produkcji zwykle 202 + generowanie w tle (waitUntil), potem polling z tabeli.
+ * Krótki timeout invoke — odpowiedź przychodzi od razu; długi czas to OpenAI w isolate.
+ */
 async function invokeDietGenerateEdge(
   supabase: ReturnType<typeof createClient>,
-  planId: string
+  planId: string,
+  onPolling: () => void
 ): Promise<DietPayload> {
   const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
   if (refreshErr) {
@@ -110,11 +158,16 @@ async function invokeDietGenerateEdge(
   const { data, error } = await supabase.functions.invoke<EdgeDietResponse>("diet-generate", {
     body: { planId },
     headers: { Authorization: `Bearer ${accessToken}` },
-    timeout: 180_000,
+    timeout: 90_000,
   });
 
   if (error) {
     throw new Error(await messageFromSupabaseFunctionError(error));
+  }
+
+  if (data?.accepted === true && data.planId) {
+    onPolling();
+    return waitForPlanPayload(supabase, data.planId, { maxMs: 360_000, intervalMs: 2500 });
   }
 
   if (data?.ok && data.payload) {
@@ -141,6 +194,7 @@ export function DietWizard() {
   const [pantryItems, setPantryItems] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [loadingHint, setLoadingHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; payload: DietPayload } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -207,6 +261,7 @@ export function DietWizard() {
 
   async function handleGenerate() {
     setError(null);
+    setLoadingHint(null);
     setLoading(true);
     const fetchMs = 120_000;
     try {
@@ -281,7 +336,10 @@ export function DietWizard() {
       }
 
       if (res.status === 202 && data.id && data.status === "pending") {
-        const payload = await invokeDietGenerateEdge(supabase, data.id);
+        setLoadingHint("Uruchamiam generator (to zwykle 1–3 min)…");
+        const payload = await invokeDietGenerateEdge(supabase, data.id, () =>
+          setLoadingHint("AI układa plan — możesz zostawić kartę otwartą. To nie zawiesza połączenia HTTP.")
+        );
         clearWizardDraft();
         setResult({ id: data.id, payload });
         setStep(STEPS.length);
@@ -315,6 +373,7 @@ export function DietWizard() {
       }
     } finally {
       setLoading(false);
+      setLoadingHint(null);
     }
   }
 
@@ -626,6 +685,12 @@ export function DietWizard() {
           )}
         </motion.div>
       </AnimatePresence>
+
+      {loadingHint && (
+        <p className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+          {loadingHint}
+        </p>
+      )}
 
       {error && (
         <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100" role="alert">
