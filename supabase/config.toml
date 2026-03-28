@@ -1,0 +1,5 @@
+# Edge Functions: gateway JWT check. This function validates the user JWT in code (getUser()).
+# Deploy: supabase functions deploy diet-generate --project-ref <ref>
+# Or toggle via Management API PATCH (see README).
+[functions.diet-generate]
+verify_jwt = false

@@ -85,6 +85,7 @@ git push -u origin main
    - W Supabase → **Edge Functions → Secrets** ustaw **`OPENAI_API_KEY`** (ten sam klucz co w OpenAI). Opcjonalnie **`OPENAI_MODEL`** (domyślnie `gpt-4o-mini`).
    - Bez tego sekretu plan zostaje w stanie `pending`, a w logach funkcji widać błąd braku klucza.
    - Jeśli w przeglądarce widzisz **„Invalid JWT”**: w panelu Supabase otwórz funkcję **diet-generate** i **wyłącz weryfikację JWT na bramce** (np. *Enforce JWT verification* / *Verify JWT* — zależnie od wersji UI). Dostęp i tak sprawdzamy w kodzie funkcji (`getUser()`). Upewnij się też, że na Vercel **`NEXT_PUBLIC_SUPABASE_URL`** i **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** są z **tego samego** projektu co funkcja.
+   - **Bez panelu** (token z *Account → Access Tokens*): wyłączenie samej bramki JWT **bez ponownego wgrywania kodu** — `PATCH` Management API z parametrem zapytania `verify_jwt=false` (projekt `zzvkmrhvezsyrmwcntgh`, slug `diet-generate`). Przykład PowerShell: `Invoke-RestMethod -Method Patch -Uri 'https://api.supabase.com/v1/projects/zzvkmrhvezsyrmwcntgh/functions/diet-generate?verify_jwt=false' -Headers @{ Authorization = 'Bearer ' + $env:SUPABASE_ACCESS_TOKEN }`. Następnie z CLI lub MCP sprawdź, że funkcja ma `verify_jwt: false`.
 
 5. **Stripe (opcjonalnie)**
 
